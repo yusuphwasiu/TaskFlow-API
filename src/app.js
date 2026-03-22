@@ -1,8 +1,9 @@
 import { createServer } from 'node:http';
-import { isValidRole } from './constants/roles.js';
+import { isValidRole, ROLES, PERMISSIONS, VALID_ROLES, hasPermission } from './constants/roles.js';
 import { parseFormBody, parseJsonBody, parseRoleRoute, sendHtml, sendJson } from './http.js';
 import { authorizeRequest } from './middleware/authorize.js';
 import { applyRateLimit } from './middleware/rateLimit.js';
+import { sendBadRequest, sendNotFound, sendForbidden } from './middleware/errorHandler.js';
 import { sendBadRequest, sendNotFound } from './middleware/errorHandler.js';
 import { createRoleService } from './services/roleService.js';
 import { createUserStore } from './services/userStore.js';
@@ -186,6 +187,116 @@ export function createApp(dependencies = {}) {
 
       response.writeHead(303, { location: `/admin/roles?asUser=${encodeURIComponent(user.id)}` });
       response.end();
+      return;
+    }
+
+    // Role introspection endpoints
+    if (request.method === 'GET' && url.pathname === '/api/roles') {
+      const user = await authorizeRequest(request, response, {
+        permission: 'profile:read',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      sendJson(response, 200, {
+        data: VALID_ROLES.map(role => ({
+          name: role,
+          permissions: PERMISSIONS[role] ?? [],
+        })),
+      });
+      return;
+    }
+
+    // Parse role detail route: /api/roles/{role}
+    const roleDetailMatch = url.pathname.match(/^\/api\/roles\/([^/]+)$/);
+    if (request.method === 'GET' && roleDetailMatch) {
+      const user = await authorizeRequest(request, response, {
+        permission: 'profile:read',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      const requestedRole = decodeURIComponent(roleDetailMatch[1]);
+
+      if (!isValidRole(requestedRole)) {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
+      sendJson(response, 200, {
+        data: {
+          name: requestedRole,
+          permissions: PERMISSIONS[requestedRole] ?? [],
+        },
+      });
+      return;
+    }
+
+    // Parse user role route: /api/users/{userId}/role
+    const userRoleMatch = url.pathname.match(/^\/api\/users\/([^/]+)\/role$/);
+    if (request.method === 'GET' && userRoleMatch) {
+      const user = await authorizeRequest(request, response, {
+        permission: 'profile:read',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      const requestedUserId = decodeURIComponent(userRoleMatch[1]);
+
+      // Users can only view their own role, admins can view any role
+      if (user.id !== requestedUserId && !hasPermission(user.role, 'admin:manage')) {
+        sendForbidden(response, 'Forbidden');
+        return;
+      }
+
+      const requestedUser = userStore.getUserById(requestedUserId);
+
+      if (!requestedUser) {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
+      sendJson(response, 200, {
+        data: {
+          userId: requestedUser.id,
+          role: requestedUser.role,
+        },
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/permissions') {
+      const user = await authorizeRequest(request, response, {
+        permission: 'profile:read',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      // Extract all unique permissions from all roles
+      const allPermissions = new Set();
+      Object.values(PERMISSIONS).forEach(rolePermissions => {
+        rolePermissions.forEach(permission => allPermissions.add(permission));
+      });
+
+      sendJson(response, 200, {
+        data: Array.from(allPermissions).sort(),
+      });
       return;
     }
 
