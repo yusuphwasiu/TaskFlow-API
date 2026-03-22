@@ -2,17 +2,26 @@ import { createServer } from 'node:http';
 import { isValidRole } from './constants/roles.js';
 import { parseFormBody, parseJsonBody, parseRoleRoute, sendHtml, sendJson } from './http.js';
 import { authorizeRequest } from './middleware/authorize.js';
+import { applyRateLimit } from './middleware/rateLimit.js';
+import { sendBadRequest, sendNotFound } from './middleware/errorHandler.js';
 import { createRoleService } from './services/roleService.js';
 import { createUserStore } from './services/userStore.js';
+import { createRateLimitService } from './services/rateLimitService.js';
 import { renderRoleAdminPage } from './ui/roleAdminPage.js';
 
 export function createApp(dependencies = {}) {
   const logger = dependencies.logger ?? console;
   const userStore = dependencies.userStore ?? createUserStore();
   const roleService = dependencies.roleService ?? createRoleService({ userStore });
+  const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
 
   async function requestListener(request, response) {
     const url = new URL(request.url, 'http://localhost');
+
+    const ok = await applyRateLimit(request, response, { rateLimitService, logger });
+    if (!ok) {
+      return;
+    }
 
     if (request.method === 'GET' && url.pathname === '/health') {
       sendJson(response, 200, { status: 'ok' });
@@ -52,7 +61,7 @@ export function createApp(dependencies = {}) {
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendJson(response, 400, { error: 'Invalid JSON body' });
+        sendBadRequest(response, 'Bad Request');
         return;
       }
 
@@ -101,12 +110,12 @@ export function createApp(dependencies = {}) {
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendJson(response, 400, { error: 'Invalid JSON body' });
+        sendBadRequest(response, 'Bad Request');
         return;
       }
 
       if (!isValidRole(payload.role)) {
-        sendJson(response, 400, { error: 'Invalid role specified' });
+        sendBadRequest(response, 'Invalid role specified');
         return;
       }
 
@@ -118,10 +127,10 @@ export function createApp(dependencies = {}) {
           return;
         }
         if (result.error === 'User not found') {
-          sendJson(response, 404, { error: 'User not found' });
+          sendNotFound(response, 'Not Found');
           return;
         }
-        sendJson(response, 400, { error: result.error });
+        sendBadRequest(response, result.error);
         return;
       }
 
@@ -167,8 +176,11 @@ export function createApp(dependencies = {}) {
           sendJson(response, 500, { error: result.error });
           return;
         }
-        const statusCode = result.error === 'User not found' ? 404 : 400;
-        sendJson(response, statusCode, { error: result.error });
+        if (result.error === 'User not found') {
+          sendNotFound(response, 'Not Found');
+          return;
+        }
+        sendBadRequest(response, result.error);
         return;
       }
 
@@ -177,7 +189,7 @@ export function createApp(dependencies = {}) {
       return;
     }
 
-    sendJson(response, 404, { error: 'Not found' });
+    sendNotFound(response, 'Not Found');
   }
 
   return createServer(requestListener);

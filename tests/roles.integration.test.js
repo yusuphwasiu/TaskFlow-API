@@ -97,7 +97,7 @@ test('AC-4: role retrieval failure is logged and returns 503', async () => {
 
     assert.equal(response.status, 503);
     const body = await response.json();
-    assert.equal(body.error, 'Role service unavailable');
+    assert.equal(body.error, 'Service Unavailable');
     assert.equal(errors.length, 1);
     assert.equal(errors[0].message, 'Role retrieval failed');
     assert.equal(errors[0].metadata.message, 'Role retrieval service unavailable');
