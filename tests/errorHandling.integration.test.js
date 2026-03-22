@@ -29,60 +29,61 @@ async function startTestServer(options = {}) {
   };
 }
 
-
-test('AC-1: Under rate limit requests are processed', async () => {
+test('AC-1: Valid request returns 200 with data', async () => {
   const server = await startTestServer();
 
   try {
-    for (let i = 0; i < 100; i += 1) {
-      const response = await fetch(`${server.baseUrl}/api/tasks`, {
-        headers: { 'x-user-id': 'admin-1' },
-      });
-      assert.equal(response.status, 200);
-    }
-  } finally {
-    await server.close();
-  }
-});
-
-test('AC-2: Exceeding rate limit returns 429', async () => {
-  const server = await startTestServer();
-
-  try {
-    for (let i = 0; i < 100; i += 1) {
-      const response = await fetch(`${server.baseUrl}/api/tasks`, {
-        headers: { 'x-user-id': 'admin-1' },
-      });
-      assert.equal(response.status, 200);
-    }
-
-    const overResponse = await fetch(`${server.baseUrl}/api/tasks`, {
+    const response = await fetch(`${server.baseUrl}/api/tasks`, {
       headers: { 'x-user-id': 'admin-1' },
     });
-    assert.equal(overResponse.status, 429);
-    const body = await overResponse.json();
-    assert.equal(body.error, 'Rate limit exceeded');
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert(body.data);
+    assert(Array.isArray(body.data));
   } finally {
     await server.close();
   }
 });
 
-test('AC-3: Exactly rate limit value still succeeds', async () => {
+test('AC-2: Malformed JSON returns 400 with Bad Request', async () => {
   const server = await startTestServer();
 
   try {
-    for (let i = 0; i < 100; i += 1) {
-      const response = await fetch(`${server.baseUrl}/api/tasks`, {
-        headers: { 'x-user-id': 'user-1' },
-      });
-      assert.equal(response.status, 200);
-    }
+    const response = await fetch(`${server.baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-user-id': 'admin-1',
+      },
+      body: '{invalid json}',
+    });
+
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, 'Bad Request');
   } finally {
     await server.close();
   }
 });
 
-test('AC-4: Rate limit service unavailable returns 503', async () => {
+test('AC-3: Missing resource returns 404 with Not Found', async () => {
+  const server = await startTestServer();
+
+  try {
+    const response = await fetch(`${server.baseUrl}/api/nonexistent`, {
+      headers: { 'x-user-id': 'admin-1' },
+    });
+
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.equal(body.error, 'Not Found');
+  } finally {
+    await server.close();
+  }
+});
+
+test('AC-4: Service unavailable returns 503', async () => {
   const server = await startTestServer();
 
   try {

@@ -1,4 +1,4 @@
-import { sendJson } from '../http.js';
+import { sendRateLimitExceeded, sendServiceUnavailable } from './errorHandler.js';
 
 export async function applyRateLimit(request, response, options) {
   const { rateLimitService, logger } = options;
@@ -8,14 +8,14 @@ export async function applyRateLimit(request, response, options) {
 
     if (!result.allowed) {
       logger.warn?.('Rate limit exceeded', { userId: result.userId, count: result.count, limit: result.limit });
-      sendJson(response, 429, { error: 'Rate limit exceeded' });
+      sendRateLimitExceeded(response, 'Rate limit exceeded');
       return false;
     }
 
     return true;
   } catch (error) {
     logger.error?.('Rate limit service unavailable', { message: error.message });
-    sendJson(response, 503, { error: 'Service Unavailable' });
+    sendServiceUnavailable(response, 'Service Unavailable');
     return false;
   }
 }
