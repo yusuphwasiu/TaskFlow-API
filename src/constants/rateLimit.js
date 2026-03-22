@@ -1,0 +1,4 @@
+export const RATE_LIMIT = {
+  MAX_REQUESTS_PER_MINUTE: 100,
+  WINDOW_MS: 60 * 1000,
+};
