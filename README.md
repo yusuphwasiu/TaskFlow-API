@@ -45,3 +45,15 @@ Admins can assign or change user roles via the API:
 - **Validation**: Invalid role assignments are rejected with a 400 error
 - **Error Handling**: Server errors during role assignment return a 500 status code
 
+## Rate Limiting
+
+TaskFlow API enforces per-user rate limiting to prevent abuse:
+
+- `100` requests per `60` seconds per `x-user-id`
+- If a request is over the limit, API returns `429` with:
+  - `{ "error": "Rate limit exceeded" }`
+- If rate limiting subsystem is unavailable (e.g., header `x-rate-limit-service-fail`), API returns `503` with:
+  - `{ "error": "Service Unavailable" }`
+- Logging on limit violation and service failures is performed via the configured logger
+
+

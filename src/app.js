@@ -2,17 +2,25 @@ import { createServer } from 'node:http';
 import { isValidRole } from './constants/roles.js';
 import { parseFormBody, parseJsonBody, parseRoleRoute, sendHtml, sendJson } from './http.js';
 import { authorizeRequest } from './middleware/authorize.js';
+import { applyRateLimit } from './middleware/rateLimit.js';
 import { createRoleService } from './services/roleService.js';
 import { createUserStore } from './services/userStore.js';
+import { createRateLimitService } from './services/rateLimitService.js';
 import { renderRoleAdminPage } from './ui/roleAdminPage.js';
 
 export function createApp(dependencies = {}) {
   const logger = dependencies.logger ?? console;
   const userStore = dependencies.userStore ?? createUserStore();
   const roleService = dependencies.roleService ?? createRoleService({ userStore });
+  const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
 
   async function requestListener(request, response) {
     const url = new URL(request.url, 'http://localhost');
+
+    const ok = await applyRateLimit(request, response, { rateLimitService, logger });
+    if (!ok) {
+      return;
+    }
 
     if (request.method === 'GET' && url.pathname === '/health') {
       sendJson(response, 200, { status: 'ok' });
