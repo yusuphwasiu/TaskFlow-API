@@ -45,3 +45,79 @@ Admins can assign or change user roles via the API:
 - **Validation**: Invalid role assignments are rejected with a 400 error
 - **Error Handling**: Server errors during role assignment return a 500 status code
 
+## Role Introspection API
+
+The API provides endpoints for querying role and permission information:
+
+### List All Roles
+
+**Endpoint:** `GET /api/roles`
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "name": "admin",
+      "permissions": ["*"]
+    },
+    {
+      "name": "user",
+      "permissions": ["tasks:read", "tasks:write", "profile:read"]
+    },
+    {
+      "name": "viewer",
+      "permissions": ["tasks:read", "profile:read"]
+    }
+  ]
+}
+```
+
+### Get Role Details
+
+**Endpoint:** `GET /api/roles/{role}`
+
+**Example:** `GET /api/roles/admin`
+
+**Response:**
+```json
+{
+  "data": {
+    "name": "admin",
+    "permissions": ["*"]
+  }
+}
+```
+
+### Get User Role
+
+**Endpoint:** `GET /api/users/{userId}/role`
+
+**Response:**
+```json
+{
+  "data": {
+    "userId": "admin-1",
+    "role": "admin"
+  }
+}
+```
+
+**Access Control:**
+- Users can view their own role
+- Admins can view any user's role
+- Non-admin users cannot view other users' roles (returns 403 Forbidden)
+
+### List All Permissions
+
+**Endpoint:** `GET /api/permissions`
+
+**Response:**
+```json
+{
+  "data": ["*", "profile:read", "tasks:read", "tasks:write"]
+}
+```
+
+**Authentication:** All role introspection endpoints require authentication with `profile:read` permission.
+
