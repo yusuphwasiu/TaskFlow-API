@@ -16,6 +16,7 @@ import { createRoleService } from './services/roleService.js';
 import { createRateLimitService } from './services/rateLimitService.js';
 import { createUserStore } from './services/userStore.js';
 import { createTaskStore } from './services/taskStore.js';
+import { createAuditStore } from './services/auditStore.js';
 import { renderRoleAdminPage } from './ui/roleAdminPage.js';
 import { renderTaskPage } from './ui/taskPage.js';
 
@@ -27,7 +28,11 @@ export function createApp(dependencies = {}) {
   const userStore = dependencies.userStore ?? createUserStore();
   const roleService = dependencies.roleService ?? createRoleService({ userStore });
   const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
+  const auditRateLimitService =
+    dependencies.auditRateLimitService ??
+    createRateLimitService({ limit: 10, windowMs: 60_000 });
   const taskStore = dependencies.taskStore ?? createTaskStore();
+  const auditStore = dependencies.auditStore ?? createAuditStore();
   const alertAdmin = dependencies.alertAdmin ?? (() => {});
 
   async function requestListener(request, response) {
@@ -161,6 +166,11 @@ export function createApp(dependencies = {}) {
       const deleteResult = attemptDeleteWithRetries(taskId, 3);
 
       if (deleteResult.success) {
+        // Log the deletion to audit store
+        auditStore.logDeletedTask(taskId, user.id, {
+          title: task.title,
+          userRole: user.role,
+        });
         sendJson(response, 200, { data: { id: taskId, deleted: true } });
         return;
       }
@@ -176,6 +186,54 @@ export function createApp(dependencies = {}) {
       }
 
       sendInternalServerError(response, 'Deletion failed, please try again later');
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/audit/tasks') {
+      // Require admin:manage permission to access audit logs
+      const user = await authorizeRequest(request, response, {
+        permission: 'admin:manage',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      // Apply rate limiting: 10 requests per minute per user
+      const allowed = await applyRateLimit(request, response, {
+        rateLimitService: auditRateLimitService,
+        logger,
+        alertAdmin,
+      });
+
+      if (!allowed) {
+        return;
+      }
+
+      // Parse query filters
+      const filters = {};
+      const queryUserId = url.searchParams.get('userId');
+      const queryStartDate = url.searchParams.get('startDate');
+      const queryEndDate = url.searchParams.get('endDate');
+
+      if (queryUserId) {
+        filters.userId = queryUserId;
+      }
+      if (queryStartDate) {
+        filters.startDate = queryStartDate;
+      }
+      if (queryEndDate) {
+        filters.endDate = queryEndDate;
+      }
+
+      // Retrieve filtered audit logs
+      const logs = auditStore.getAuditLogs(filters);
+
+      sendJson(response, 200, {
+        data: logs,
+      });
       return;
     }
 

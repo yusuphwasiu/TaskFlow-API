@@ -89,6 +89,60 @@ Admins can assign or change user roles via the API:
 
 A simple HTML task listing is available at `GET /tasks` with a built-in confirmation dialog before deletion. This page is intended to demonstrate the deletion flow and provide a confirmation prompt for assigned users.
 
+## Audit API
+
+The Audit API provides endpoints for retrieving audit logs of deleted tasks for compliance and accountability purposes.
+
+### Get Task Deletion Audit Logs
+
+**Endpoint:** `GET /api/audit/tasks`
+
+**Permissions:** `admin:manage` (only admins can access audit logs)
+
+**Query Parameters:**
+- `userId` (optional) - Filter logs by the user who deleted the task
+- `startDate` (optional) - Filter logs by start date (ISO 8601 format, e.g., `2026-06-17T00:00:00Z`)
+- `endDate` (optional) - Filter logs by end date (ISO 8601 format, e.g., `2026-06-17T23:59:59Z`)
+
+**Example Requests:**
+```
+GET /api/audit/tasks - Retrieve all deletion logs
+GET /api/audit/tasks?userId=user-1 - Retrieve logs for a specific user
+GET /api/audit/tasks?startDate=2026-06-17T00:00:00Z&endDate=2026-06-17T23:59:59Z - Retrieve logs within a date range
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "id": "audit-1624982400000-abc123",
+      "taskId": "task-1",
+      "userId": "user-1",
+      "taskTitle": "Define roles and permissions",
+      "deletedAt": "2026-06-17T10:30:00.000Z",
+      "userRole": "user",
+      "workspace": null,
+      "project": null
+    }
+  ]
+}
+```
+
+**Responses:**
+- `200 OK` - Audit logs retrieved successfully (returns empty array if no matches)
+- `401 Unauthorized` - Authentication required
+- `403 Forbidden` - Insufficient permissions (`admin:manage` required)
+- `429 Too Many Requests` - Rate limit exceeded
+
+**Rate limiting:** 10 requests per minute per user
+
+**Behavior:**
+- All deleted tasks are automatically logged with timestamp, user ID, task details, and user role
+- Logs are stored and retrievable for compliance review
+- Filtering by date range allows for period-based audits
+- Unauthorized users (non-admins) receive a 403 error
+
 ## Role Introspection API
 
 The API provides endpoints for querying role and permission information:
