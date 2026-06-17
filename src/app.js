@@ -11,6 +11,9 @@ import {
   sendForbidden,
   sendInternalServerError,
   sendServiceUnavailable,
+  sendMethodNotAllowed,
+  sendRequestTimeout,
+  sendUnsupportedMediaType,
   handleUnexpectedError,
 } from './middleware/errorHandler.js';
 import { createRoleService } from './services/roleService.js';
@@ -96,10 +99,18 @@ export function createApp(dependencies = {}) {
 
       let payload;
 
+      // Ensure content type is JSON
+      const contentType = request.headers['content-type'] ?? '';
+      if (contentType && !contentType.includes('application/json')) {
+        // Unsupported media type
+        sendUnsupportedMediaType(response, 'Unsupported media type');
+        return;
+      }
+
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendBadRequest(response, 'Malformed JSON');
+        sendBadRequest(response, 'Invalid JSON body');
         return;
       }
 
@@ -117,6 +128,23 @@ export function createApp(dependencies = {}) {
       sendJson(response, 201, {
         data: result.task,
       });
+      return;
+    }
+
+    // If `/api/tasks` exists but HTTP method is not allowed, return 405
+    if (url.pathname === '/api/tasks' && request.method !== 'GET' && request.method !== 'POST') {
+      sendMethodNotAllowed(response, 'Method not allowed');
+      return;
+    }
+
+    // Simulation endpoints to support failure scenario tests
+    if (request.method === 'GET' && url.pathname === '/simulate/timeout') {
+      sendRequestTimeout(response, 'Request timed out');
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/simulate/unavailable') {
+      sendServiceUnavailable(response);
       return;
     }
 

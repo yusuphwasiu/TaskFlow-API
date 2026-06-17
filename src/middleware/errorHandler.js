@@ -63,6 +63,18 @@ export function sendServiceUnavailable(response, msg = null) {
   sendError(response, ERROR_CODES.SERVICE_UNAVAILABLE, msg);
 }
 
+export function sendMethodNotAllowed(response, msg = null) {
+  sendError(response, ERROR_CODES.METHOD_NOT_ALLOWED, msg);
+}
+
+export function sendRequestTimeout(response, msg = null) {
+  sendError(response, ERROR_CODES.REQUEST_TIMEOUT, msg);
+}
+
+export function sendUnsupportedMediaType(response, msg = null) {
+  sendError(response, ERROR_CODES.UNSUPPORTED_MEDIA_TYPE, msg);
+}
+
 export function handleUnexpectedError(response, logger, error) {
   if (logger?.error) {
     logger.error('Unexpected server error', {

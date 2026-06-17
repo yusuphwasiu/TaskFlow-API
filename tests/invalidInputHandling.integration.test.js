@@ -103,7 +103,7 @@ test('Handle Malformed JSON', async () => {
 
     assert.equal(response.status, 400);
     const body = await response.json();
-    assert.equal(body.error, 'Malformed JSON');
+    assert.equal(body.error, 'Invalid JSON body');
   } finally {
     await app.close();
   }

@@ -29,6 +29,18 @@ export const ERROR_CODES = {
   },
   SERVICE_UNAVAILABLE: {
     statusCode: 503,
-    message: 'Service Unavailable',
+    message: 'Service unavailable',
+  },
+  METHOD_NOT_ALLOWED: {
+    statusCode: 405,
+    message: 'Method Not Allowed',
+  },
+  REQUEST_TIMEOUT: {
+    statusCode: 408,
+    message: 'Request Timeout',
+  },
+  UNSUPPORTED_MEDIA_TYPE: {
+    statusCode: 415,
+    message: 'Unsupported Media Type',
   },
 };

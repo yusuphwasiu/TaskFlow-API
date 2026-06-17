@@ -17,7 +17,7 @@ export async function applyRateLimit(request, response, options) {
     return true;
   } catch (error) {
     logger.error?.('Rate limit service unavailable', { message: error.message });
-    sendServiceUnavailable(response, 'Service Unavailable');
+    sendServiceUnavailable(response, 'Service unavailable');
     return false;
   }
 }

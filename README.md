@@ -233,6 +233,23 @@ The checkout endpoint accepts authenticated requests and enforces per-user rate 
 - `401 Unauthorized` - Authentication required
 - `429 Too Many Requests` - Rate limit exceeded
 
+## Error Codes
+
+The API uses consistent HTTP status codes and messages for failure scenarios. Common codes include:
+
+- `400 Bad Request` - Malformed input or validation errors
+- `401 Unauthorized` - Authentication required
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Resource not found
+- `405 Method Not Allowed` - Unsupported HTTP method for the endpoint
+- `408 Request Timeout` - Request timed out
+- `415 Unsupported Media Type` - Unsupported payload/content type
+- `429 Too Many Requests` - Rate limit exceeded
+- `500 Internal Server Error` - Server-side error
+- `503 Service Unavailable` - Service temporarily unavailable
+
+Endpoints will include an `error` message and a `standard` field in JSON error responses to help consumers handle failures programmatically.
+
 **Monitoring:** Rate limit breaches are logged and alert administrators for abuse detection.
 
 **Authentication:** All role introspection endpoints require authentication with `profile:read` permission.
