@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
+import { createUserStore } from '../src/services/userStore.js';
 
-async function startTestServer(logger = console) {
-  const server = createApp({ logger });
+async function startTestServer(dependencies = {}) {
+  const server = createApp(dependencies);
 
   await new Promise((resolve) => {
     server.listen(0, resolve);

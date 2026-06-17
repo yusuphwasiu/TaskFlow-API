@@ -3,23 +3,62 @@ import { isValidRole, ROLES, PERMISSIONS, VALID_ROLES, hasPermission } from './c
 import { parseFormBody, parseJsonBody, parseRoleRoute, sendHtml, sendJson } from './http.js';
 import { authorizeRequest } from './middleware/authorize.js';
 import { applyRateLimit } from './middleware/rateLimit.js';
-import { sendBadRequest, sendNotFound, sendForbidden } from './middleware/errorHandler.js';
+import {
+  sendBadRequest,
+  sendMissingParameter,
+  sendNotFound,
+  sendForbidden,
+  sendInternalServerError,
+  sendServiceUnavailable,
+  handleUnexpectedError,
+} from './middleware/errorHandler.js';
 import { createRoleService } from './services/roleService.js';
+import { createRateLimitService } from './services/rateLimitService.js';
 import { createUserStore } from './services/userStore.js';
+import { createTaskStore } from './services/taskStore.js';
 import { renderRoleAdminPage } from './ui/roleAdminPage.js';
+import { renderTaskPage } from './ui/taskPage.js';
 
 export function createApp(dependencies = {}) {
-  const logger = dependencies.logger ?? console;
+  const logger =
+    dependencies && typeof dependencies.error === 'function'
+      ? dependencies
+      : dependencies.logger ?? console;
   const userStore = dependencies.userStore ?? createUserStore();
   const roleService = dependencies.roleService ?? createRoleService({ userStore });
+  const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
+  const taskStore = dependencies.taskStore ?? createTaskStore();
+  const alertAdmin = dependencies.alertAdmin ?? (() => {});
 
   async function requestListener(request, response) {
+    // Attach the request-scoped logger to the response so middleware can log structured errors
+    response.__logger = logger;
     const url = new URL(request.url, 'http://localhost');
 
-    if (request.method === 'GET' && url.pathname === '/health') {
-      sendJson(response, 200, { status: 'ok' });
+    try {
+      if (request.method === 'GET' && url.pathname === '/health') {
+        sendJson(response, 200, { status: 'ok' });
+        return;
+      }
+
+    if (request.method === 'GET' && url.pathname === '/tasks') {
+      const actingUserId = url.searchParams.get('asUser') ?? request.headers['x-user-id'];
+      const user = await authorizeRequest(request, response, {
+        permission: 'tasks:read',
+        roleService,
+        logger,
+        actingUserId,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      sendHtml(response, 200, renderTaskPage(taskStore.getAllTasksForUser(user), user.id));
       return;
     }
+
+    const taskDeleteMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
 
     if (request.method === 'GET' && url.pathname === '/api/tasks') {
       const user = await authorizeRequest(request, response, {
@@ -33,7 +72,7 @@ export function createApp(dependencies = {}) {
       }
 
       sendJson(response, 200, {
-        data: [{ id: 'task-1', title: 'Define roles and permissions', visibleTo: user.role }],
+        data: taskStore.getAllTasksForUser(user),
       });
       return;
     }
@@ -54,15 +93,117 @@ export function createApp(dependencies = {}) {
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendJson(response, 400, { error: 'Invalid JSON body' });
+        sendBadRequest(response, 'Invalid JSON body');
         return;
       }
 
+      if (!payload.title) {
+        sendMissingParameter(response);
+        return;
+      }
+
+      const result = taskStore.createTask({
+        title: payload.title,
+        assignedTo: user.id,
+        visibleTo: user.role,
+      });
+
       sendJson(response, 201, {
+        data: result.task,
+      });
+      return;
+    }
+
+    if (request.method === 'DELETE' && taskDeleteMatch) {
+      const user = await authorizeRequest(request, response, {
+        permission: 'tasks:write',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      const taskId = decodeURIComponent(taskDeleteMatch[1]);
+      const task = taskStore.getTaskById(taskId);
+
+      if (!task) {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
+      if (task.assignedTo !== user.id) {
+        sendForbidden(response, 'You are not authorized to delete this task');
+        return;
+      }
+
+      function attemptDeleteWithRetries(id, attempts = 3) {
+        let lastResult;
+
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          const result = taskStore.deleteTask(id);
+
+          if (result.success) {
+            return result;
+          }
+
+          lastResult = result;
+
+          if (!result.isTransient) {
+            break;
+          }
+        }
+
+        return lastResult;
+      }
+
+      const deleteResult = attemptDeleteWithRetries(taskId, 3);
+
+      if (deleteResult.success) {
+        sendJson(response, 200, { data: { id: taskId, deleted: true } });
+        return;
+      }
+
+      if (deleteResult.error === 'Task not found') {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
+      if (deleteResult.isTransient) {
+        sendServiceUnavailable(response, 'Deletion failed, please try again later');
+        return;
+      }
+
+      sendInternalServerError(response, 'Deletion failed, please try again later');
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/checkout') {
+      const user = await authorizeRequest(request, response, {
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      const allowed = await applyRateLimit(request, response, {
+        rateLimitService,
+        logger,
+        alertAdmin,
+      });
+
+      if (!allowed) {
+        return;
+      }
+
+      sendJson(response, 200, {
         data: {
-          id: 'task-created-1',
-          title: payload.title ?? 'Untitled task',
-          createdBy: user.id,
+          action: 'checkout',
+          userId: user.id,
+          status: 'processed',
         },
       });
       return;
@@ -103,12 +244,17 @@ export function createApp(dependencies = {}) {
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendJson(response, 400, { error: 'Invalid JSON body' });
+        sendBadRequest(response, 'Invalid JSON body');
+        return;
+      }
+
+      if (!payload.role) {
+        sendMissingParameter(response);
         return;
       }
 
       if (!isValidRole(payload.role)) {
-        sendJson(response, 400, { error: 'Invalid role specified' });
+        sendBadRequest(response, 'Invalid role specified');
         return;
       }
 
@@ -116,14 +262,14 @@ export function createApp(dependencies = {}) {
 
       if (result.error) {
         if (result.isServerError) {
-          sendJson(response, 500, { error: result.error });
+          sendInternalServerError(response, 'Role assignment failed due to server error');
           return;
         }
         if (result.error === 'User not found') {
-          sendJson(response, 404, { error: 'User not found' });
+          sendNotFound(response, 'User not found');
           return;
         }
-        sendJson(response, 400, { error: result.error });
+        sendBadRequest(response, result.error);
         return;
       }
 
@@ -162,11 +308,17 @@ export function createApp(dependencies = {}) {
       }
 
       const formData = await parseFormBody(request);
+
+      if (!formData.role) {
+        sendMissingParameter(response);
+        return;
+      }
+
       const result = userStore.assignRole(formData.userId, formData.role);
 
       if (result.error) {
         if (result.isServerError) {
-          sendJson(response, 500, { error: result.error });
+          sendInternalServerError(response, 'Role assignment failed due to server error');
           return;
         }
         const statusCode = result.error === 'User not found' ? 404 : 400;
@@ -290,6 +442,9 @@ export function createApp(dependencies = {}) {
     }
 
     sendNotFound(response, 'Not Found');
+  } catch (error) {
+    handleUnexpectedError(response, logger, error);
+  }
   }
 
   return createServer(requestListener);

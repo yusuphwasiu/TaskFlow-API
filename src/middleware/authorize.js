@@ -1,5 +1,5 @@
 import { hasPermission } from '../constants/roles.js';
-import { sendJson } from '../http.js';
+import { sendUnauthorized, sendForbidden, sendServiceUnavailable } from '../middleware/errorHandler.js';
 
 export async function authorizeRequest(request, response, options) {
   const { permission, roleService, logger, actingUserId } = options;
@@ -18,19 +18,23 @@ export async function authorizeRequest(request, response, options) {
     }
 
     if (!user) {
-      sendJson(response, 401, { error: 'Authentication required' });
+      sendUnauthorized(response);
       return null;
     }
 
     if (permission && !hasPermission(user.role, permission)) {
-      sendJson(response, 403, { error: 'Forbidden' });
+      sendForbidden(response);
       return null;
     }
 
     return user;
   } catch (error) {
     logger.error('Role retrieval failed', { message: error.message });
-    sendJson(response, 503, { error: 'Role service unavailable' });
+    // Mark the response to avoid duplicate logging in the central error handler
+    try {
+      if (response) response.__suppressErrorLog = true;
+    } catch (e) {}
+    sendServiceUnavailable(response, 'Role service unavailable');
     return null;
   }
 }

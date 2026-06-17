@@ -45,6 +45,50 @@ Admins can assign or change user roles via the API:
 - **Validation**: Invalid role assignments are rejected with a 400 error
 - **Error Handling**: Server errors during role assignment return a 500 status code
 
+## Task API
+
+### List Tasks
+
+**Endpoint:** `GET /api/tasks`
+
+**Permissions:** `tasks:read`
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "id": "task-1",
+      "title": "Define roles and permissions",
+      "assignedTo": "user-1",
+      "visibleTo": "user"
+    }
+  ]
+}
+```
+
+### Delete Task
+
+**Endpoint:** `DELETE /api/tasks/{taskId}`
+
+**Permissions:** `tasks:write`
+
+**Behavior:**
+- Only the user assigned to the task may delete it.
+- The API retries task deletion up to 3 times for transient connectivity failures before failing gracefully.
+- Server-side errors return `Deletion failed, please try again later`.
+
+**Responses:**
+- `200 OK` - Task deleted successfully
+- `403 Forbidden` - `You are not authorized to delete this task`
+- `404 Not Found` - Task not found
+- `500 Internal Server Error` - `Deletion failed, please try again later`
+- `503 Service Unavailable` - `Deletion failed, please try again later`
+
+### Task Deletion UI Demo
+
+A simple HTML task listing is available at `GET /tasks` with a built-in confirmation dialog before deletion. This page is intended to demonstrate the deletion flow and provide a confirmation prompt for assigned users.
+
 ## Role Introspection API
 
 The API provides endpoints for querying role and permission information:
@@ -118,6 +162,24 @@ The API provides endpoints for querying role and permission information:
   "data": ["*", "profile:read", "tasks:read", "tasks:write"]
 }
 ```
+
+## Checkout API
+
+The checkout endpoint accepts authenticated requests and enforces per-user rate limiting to prevent abuse.
+
+**Endpoint:** `POST /api/checkout`
+
+**Headers:**
+- `x-user-id`: authenticated user identifier
+
+**Rate limit:** 100 requests per minute per user
+
+**Responses:**
+- `200 OK` - Checkout processed successfully
+- `401 Unauthorized` - Authentication required
+- `429 Too Many Requests` - Rate limit exceeded
+
+**Monitoring:** Rate limit breaches are logged and alert administrators for abuse detection.
 
 **Authentication:** All role introspection endpoints require authentication with `profile:read` permission.
 

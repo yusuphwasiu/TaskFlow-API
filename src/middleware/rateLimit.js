@@ -1,13 +1,15 @@
 import { sendRateLimitExceeded, sendServiceUnavailable } from './errorHandler.js';
 
 export async function applyRateLimit(request, response, options) {
-  const { rateLimitService, logger } = options;
+  const { rateLimitService, logger, alertAdmin } = options;
 
   try {
     const result = rateLimitService.checkRequest(request);
 
     if (!result.allowed) {
-      logger.warn?.('Rate limit exceeded', { userId: result.userId, count: result.count, limit: result.limit });
+      const metadata = { userId: result.userId, count: result.count, limit: result.limit };
+      logger.warn?.('Rate limit exceeded', metadata);
+      alertAdmin?.(metadata);
       sendRateLimitExceeded(response, 'Rate limit exceeded');
       return false;
     }

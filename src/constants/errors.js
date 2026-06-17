@@ -19,9 +19,13 @@ export const ERROR_CODES = {
     statusCode: 429,
     message: 'Rate limit exceeded',
   },
+  MISSING_PARAMETER: {
+    statusCode: 422,
+    message: 'Missing required parameter',
+  },
   INTERNAL_SERVER_ERROR: {
     statusCode: 500,
-    message: 'Internal Server Error',
+    message: 'Internal server error',
   },
   SERVICE_UNAVAILABLE: {
     statusCode: 503,
