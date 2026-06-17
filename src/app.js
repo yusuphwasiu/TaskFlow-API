@@ -3,6 +3,7 @@ import { isValidRole, ROLES, PERMISSIONS, VALID_ROLES, hasPermission } from './c
 import { parseFormBody, parseJsonBody, parseRoleRoute, sendHtml, sendJson } from './http.js';
 import { authorizeRequest } from './middleware/authorize.js';
 import { applyRateLimit } from './middleware/rateLimit.js';
+import { isValidTaskId } from './utils/validation.js';
 import {
   sendBadRequest,
   sendMissingParameter,
@@ -98,7 +99,7 @@ export function createApp(dependencies = {}) {
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendBadRequest(response, 'Invalid JSON body');
+        sendBadRequest(response, 'Malformed JSON');
         return;
       }
 
@@ -131,6 +132,12 @@ export function createApp(dependencies = {}) {
       }
 
       const taskId = decodeURIComponent(taskDeleteMatch[1]);
+      
+      // Validate task ID format
+      if (!isValidTaskId(taskId)) {
+        sendBadRequest(response, 'Invalid task ID');
+        return;
+      }
       const task = taskStore.getTaskById(taskId);
 
       if (!task) {
