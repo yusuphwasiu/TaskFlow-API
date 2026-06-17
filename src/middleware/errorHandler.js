@@ -3,7 +3,32 @@ import { ERROR_CODES } from '../constants/errors.js';
 
 export function sendError(response, errorCode, customMessage = null) {
   const { statusCode, message } = errorCode;
-  sendJson(response, statusCode, { error: customMessage ?? message });
+
+  const payload = {
+    error: customMessage ?? message,
+    standard: message,
+  };
+
+  // If a logger has been attached to the response, emit a structured log
+  try {
+    // If another part of the request already logged this error, skip duplicate logging
+    if (response && response.__suppressErrorLog) {
+      // do not log again
+    } else {
+      const logger = response && response.__logger;
+      if (logger && typeof logger.error === 'function') {
+        logger.error('API error', {
+          statusCode,
+          standard: message,
+          detail: customMessage ?? null,
+        });
+      }
+    }
+  } catch (e) {
+    // swallow logging errors to avoid masking the original response
+  }
+
+  sendJson(response, statusCode, payload);
 }
 
 export function sendBadRequest(response, msg = null) {
@@ -16,6 +41,10 @@ export function sendUnauthorized(response, msg = null) {
 
 export function sendForbidden(response, msg = null) {
   sendError(response, ERROR_CODES.FORBIDDEN, msg);
+}
+
+export function sendMissingParameter(response) {
+  sendError(response, ERROR_CODES.MISSING_PARAMETER);
 }
 
 export function sendNotFound(response, msg = null) {
@@ -32,4 +61,27 @@ export function sendInternalServerError(response, msg = null) {
 
 export function sendServiceUnavailable(response, msg = null) {
   sendError(response, ERROR_CODES.SERVICE_UNAVAILABLE, msg);
+}
+
+export function sendMethodNotAllowed(response, msg = null) {
+  sendError(response, ERROR_CODES.METHOD_NOT_ALLOWED, msg);
+}
+
+export function sendRequestTimeout(response, msg = null) {
+  sendError(response, ERROR_CODES.REQUEST_TIMEOUT, msg);
+}
+
+export function sendUnsupportedMediaType(response, msg = null) {
+  sendError(response, ERROR_CODES.UNSUPPORTED_MEDIA_TYPE, msg);
+}
+
+export function handleUnexpectedError(response, logger, error) {
+  if (logger?.error) {
+    logger.error('Unexpected server error', {
+      message: error?.message,
+      stack: error?.stack,
+    });
+  }
+
+  sendInternalServerError(response, ERROR_CODES.INTERNAL_SERVER_ERROR.message);
 }

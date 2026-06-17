@@ -45,6 +45,104 @@ Admins can assign or change user roles via the API:
 - **Validation**: Invalid role assignments are rejected with a 400 error
 - **Error Handling**: Server errors during role assignment return a 500 status code
 
+## Task API
+
+### List Tasks
+
+**Endpoint:** `GET /api/tasks`
+
+**Permissions:** `tasks:read`
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "id": "task-1",
+      "title": "Define roles and permissions",
+      "assignedTo": "user-1",
+      "visibleTo": "user"
+    }
+  ]
+}
+```
+
+### Delete Task
+
+**Endpoint:** `DELETE /api/tasks/{taskId}`
+
+**Permissions:** `tasks:write`
+
+**Behavior:**
+- Only the user assigned to the task may delete it.
+- The API retries task deletion up to 3 times for transient connectivity failures before failing gracefully.
+- Server-side errors return `Deletion failed, please try again later`.
+
+**Responses:**
+- `200 OK` - Task deleted successfully
+- `403 Forbidden` - `You are not authorized to delete this task`
+- `404 Not Found` - Task not found
+- `500 Internal Server Error` - `Deletion failed, please try again later`
+- `503 Service Unavailable` - `Deletion failed, please try again later`
+
+### Task Deletion UI Demo
+
+A simple HTML task listing is available at `GET /tasks` with a built-in confirmation dialog before deletion. This page is intended to demonstrate the deletion flow and provide a confirmation prompt for assigned users.
+
+## Audit API
+
+The Audit API provides endpoints for retrieving audit logs of deleted tasks for compliance and accountability purposes.
+
+### Get Task Deletion Audit Logs
+
+**Endpoint:** `GET /api/audit/tasks`
+
+**Permissions:** `admin:manage` (only admins can access audit logs)
+
+**Query Parameters:**
+- `userId` (optional) - Filter logs by the user who deleted the task
+- `startDate` (optional) - Filter logs by start date (ISO 8601 format, e.g., `2026-06-17T00:00:00Z`)
+- `endDate` (optional) - Filter logs by end date (ISO 8601 format, e.g., `2026-06-17T23:59:59Z`)
+
+**Example Requests:**
+```
+GET /api/audit/tasks - Retrieve all deletion logs
+GET /api/audit/tasks?userId=user-1 - Retrieve logs for a specific user
+GET /api/audit/tasks?startDate=2026-06-17T00:00:00Z&endDate=2026-06-17T23:59:59Z - Retrieve logs within a date range
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "id": "audit-1624982400000-abc123",
+      "taskId": "task-1",
+      "userId": "user-1",
+      "taskTitle": "Define roles and permissions",
+      "deletedAt": "2026-06-17T10:30:00.000Z",
+      "userRole": "user",
+      "workspace": null,
+      "project": null
+    }
+  ]
+}
+```
+
+**Responses:**
+- `200 OK` - Audit logs retrieved successfully (returns empty array if no matches)
+- `401 Unauthorized` - Authentication required
+- `403 Forbidden` - Insufficient permissions (`admin:manage` required)
+- `429 Too Many Requests` - Rate limit exceeded
+
+**Rate limiting:** 10 requests per minute per user
+
+**Behavior:**
+- All deleted tasks are automatically logged with timestamp, user ID, task details, and user role
+- Logs are stored and retrievable for compliance review
+- Filtering by date range allows for period-based audits
+- Unauthorized users (non-admins) receive a 403 error
+
 ## Role Introspection API
 
 The API provides endpoints for querying role and permission information:
@@ -118,6 +216,41 @@ The API provides endpoints for querying role and permission information:
   "data": ["*", "profile:read", "tasks:read", "tasks:write"]
 }
 ```
+
+## Checkout API
+
+The checkout endpoint accepts authenticated requests and enforces per-user rate limiting to prevent abuse.
+
+**Endpoint:** `POST /api/checkout`
+
+**Headers:**
+- `x-user-id`: authenticated user identifier
+
+**Rate limit:** 100 requests per minute per user
+
+**Responses:**
+- `200 OK` - Checkout processed successfully
+- `401 Unauthorized` - Authentication required
+- `429 Too Many Requests` - Rate limit exceeded
+
+## Error Codes
+
+The API uses consistent HTTP status codes and messages for failure scenarios. Common codes include:
+
+- `400 Bad Request` - Malformed input or validation errors
+- `401 Unauthorized` - Authentication required
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Resource not found
+- `405 Method Not Allowed` - Unsupported HTTP method for the endpoint
+- `408 Request Timeout` - Request timed out
+- `415 Unsupported Media Type` - Unsupported payload/content type
+- `429 Too Many Requests` - Rate limit exceeded
+- `500 Internal Server Error` - Server-side error
+- `503 Service Unavailable` - Service temporarily unavailable
+
+Endpoints will include an `error` message and a `standard` field in JSON error responses to help consumers handle failures programmatically.
+
+**Monitoring:** Rate limit breaches are logged and alert administrators for abuse detection.
 
 **Authentication:** All role introspection endpoints require authentication with `profile:read` permission.
 ## Rate Limiting

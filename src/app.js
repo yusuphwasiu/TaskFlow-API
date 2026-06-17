@@ -3,31 +3,71 @@ import { isValidRole, ROLES, PERMISSIONS, VALID_ROLES, hasPermission } from './c
 import { parseFormBody, parseJsonBody, parseRoleRoute, sendHtml, sendJson } from './http.js';
 import { authorizeRequest } from './middleware/authorize.js';
 import { applyRateLimit } from './middleware/rateLimit.js';
-import { sendBadRequest, sendNotFound, sendForbidden } from './middleware/errorHandler.js';
-import { sendBadRequest, sendNotFound } from './middleware/errorHandler.js';
+import { isValidTaskId } from './utils/validation.js';
+import {
+  sendBadRequest,
+  sendMissingParameter,
+  sendNotFound,
+  sendForbidden,
+  sendInternalServerError,
+  sendServiceUnavailable,
+  sendMethodNotAllowed,
+  sendRequestTimeout,
+  sendUnsupportedMediaType,
+  handleUnexpectedError,
+} from './middleware/errorHandler.js';
 import { createRoleService } from './services/roleService.js';
-import { createUserStore } from './services/userStore.js';
 import { createRateLimitService } from './services/rateLimitService.js';
+import { createUserStore } from './services/userStore.js';
+import { createTaskStore } from './services/taskStore.js';
+import { createAuditStore } from './services/auditStore.js';
 import { renderRoleAdminPage } from './ui/roleAdminPage.js';
+import { renderTaskPage } from './ui/taskPage.js';
 
 export function createApp(dependencies = {}) {
-  const logger = dependencies.logger ?? console;
+  const logger =
+    dependencies && typeof dependencies.error === 'function'
+      ? dependencies
+      : dependencies.logger ?? console;
   const userStore = dependencies.userStore ?? createUserStore();
   const roleService = dependencies.roleService ?? createRoleService({ userStore });
   const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
+  const auditRateLimitService =
+    dependencies.auditRateLimitService ??
+    createRateLimitService({ limit: 10, windowMs: 60_000 });
+  const taskStore = dependencies.taskStore ?? createTaskStore();
+  const auditStore = dependencies.auditStore ?? createAuditStore();
+  const alertAdmin = dependencies.alertAdmin ?? (() => {});
 
   async function requestListener(request, response) {
+    // Attach the request-scoped logger to the response so middleware can log structured errors
+    response.__logger = logger;
     const url = new URL(request.url, 'http://localhost');
 
-    const ok = await applyRateLimit(request, response, { rateLimitService, logger });
-    if (!ok) {
+    try {
+      if (request.method === 'GET' && url.pathname === '/health') {
+        sendJson(response, 200, { status: 'ok' });
+        return;
+      }
+
+    if (request.method === 'GET' && url.pathname === '/tasks') {
+      const actingUserId = url.searchParams.get('asUser') ?? request.headers['x-user-id'];
+      const user = await authorizeRequest(request, response, {
+        permission: 'tasks:read',
+        roleService,
+        logger,
+        actingUserId,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      sendHtml(response, 200, renderTaskPage(taskStore.getAllTasksForUser(user), user.id));
       return;
     }
 
-    if (request.method === 'GET' && url.pathname === '/health') {
-      sendJson(response, 200, { status: 'ok' });
-      return;
-    }
+    const taskDeleteMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
 
     if (request.method === 'GET' && url.pathname === '/api/tasks') {
       const user = await authorizeRequest(request, response, {
@@ -41,7 +81,7 @@ export function createApp(dependencies = {}) {
       }
 
       sendJson(response, 200, {
-        data: [{ id: 'task-1', title: 'Define roles and permissions', visibleTo: user.role }],
+        data: taskStore.getAllTasksForUser(user),
       });
       return;
     }
@@ -59,18 +99,204 @@ export function createApp(dependencies = {}) {
 
       let payload;
 
-      try {
-        payload = await parseJsonBody(request);
-      } catch {
-        sendBadRequest(response, 'Bad Request');
+      // Ensure content type is JSON
+      const contentType = request.headers['content-type'] ?? '';
+      if (contentType && !contentType.includes('application/json')) {
+        // Unsupported media type
+        sendUnsupportedMediaType(response, 'Unsupported media type');
         return;
       }
 
+      try {
+        payload = await parseJsonBody(request);
+      } catch {
+        sendBadRequest(response, 'Invalid JSON body');
+        return;
+      }
+
+      if (!payload.title) {
+        sendMissingParameter(response);
+        return;
+      }
+
+      const result = taskStore.createTask({
+        title: payload.title,
+        assignedTo: user.id,
+        visibleTo: user.role,
+      });
+
       sendJson(response, 201, {
+        data: result.task,
+      });
+      return;
+    }
+
+    // If `/api/tasks` exists but HTTP method is not allowed, return 405
+    if (url.pathname === '/api/tasks' && request.method !== 'GET' && request.method !== 'POST') {
+      sendMethodNotAllowed(response, 'Method not allowed');
+      return;
+    }
+
+    // Simulation endpoints to support failure scenario tests
+    if (request.method === 'GET' && url.pathname === '/simulate/timeout') {
+      sendRequestTimeout(response, 'Request timed out');
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/simulate/unavailable') {
+      sendServiceUnavailable(response);
+      return;
+    }
+
+    if (request.method === 'DELETE' && taskDeleteMatch) {
+      const user = await authorizeRequest(request, response, {
+        permission: 'tasks:write',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      const taskId = decodeURIComponent(taskDeleteMatch[1]);
+      
+      // Validate task ID format
+      if (!isValidTaskId(taskId)) {
+        sendBadRequest(response, 'Invalid task ID');
+        return;
+      }
+      const task = taskStore.getTaskById(taskId);
+
+      if (!task) {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
+      if (task.assignedTo !== user.id) {
+        sendForbidden(response, 'You are not authorized to delete this task');
+        return;
+      }
+
+      function attemptDeleteWithRetries(id, attempts = 3) {
+        let lastResult;
+
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          const result = taskStore.deleteTask(id);
+
+          if (result.success) {
+            return result;
+          }
+
+          lastResult = result;
+
+          if (!result.isTransient) {
+            break;
+          }
+        }
+
+        return lastResult;
+      }
+
+      const deleteResult = attemptDeleteWithRetries(taskId, 3);
+
+      if (deleteResult.success) {
+        // Log the deletion to audit store
+        auditStore.logDeletedTask(taskId, user.id, {
+          title: task.title,
+          userRole: user.role,
+        });
+        sendJson(response, 200, { data: { id: taskId, deleted: true } });
+        return;
+      }
+
+      if (deleteResult.error === 'Task not found') {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
+      if (deleteResult.isTransient) {
+        sendServiceUnavailable(response, 'Deletion failed, please try again later');
+        return;
+      }
+
+      sendInternalServerError(response, 'Deletion failed, please try again later');
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/audit/tasks') {
+      // Require admin:manage permission to access audit logs
+      const user = await authorizeRequest(request, response, {
+        permission: 'admin:manage',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      // Apply rate limiting: 10 requests per minute per user
+      const allowed = await applyRateLimit(request, response, {
+        rateLimitService: auditRateLimitService,
+        logger,
+        alertAdmin,
+      });
+
+      if (!allowed) {
+        return;
+      }
+
+      // Parse query filters
+      const filters = {};
+      const queryUserId = url.searchParams.get('userId');
+      const queryStartDate = url.searchParams.get('startDate');
+      const queryEndDate = url.searchParams.get('endDate');
+
+      if (queryUserId) {
+        filters.userId = queryUserId;
+      }
+      if (queryStartDate) {
+        filters.startDate = queryStartDate;
+      }
+      if (queryEndDate) {
+        filters.endDate = queryEndDate;
+      }
+
+      // Retrieve filtered audit logs
+      const logs = auditStore.getAuditLogs(filters);
+
+      sendJson(response, 200, {
+        data: logs,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/checkout') {
+      const user = await authorizeRequest(request, response, {
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      const allowed = await applyRateLimit(request, response, {
+        rateLimitService,
+        logger,
+        alertAdmin,
+      });
+
+      if (!allowed) {
+        return;
+      }
+
+      sendJson(response, 200, {
         data: {
-          id: 'task-created-1',
-          title: payload.title ?? 'Untitled task',
-          createdBy: user.id,
+          action: 'checkout',
+          userId: user.id,
+          status: 'processed',
         },
       });
       return;
@@ -111,7 +337,12 @@ export function createApp(dependencies = {}) {
       try {
         payload = await parseJsonBody(request);
       } catch {
-        sendBadRequest(response, 'Bad Request');
+        sendBadRequest(response, 'Invalid JSON body');
+        return;
+      }
+
+      if (!payload.role) {
+        sendMissingParameter(response);
         return;
       }
 
@@ -124,11 +355,11 @@ export function createApp(dependencies = {}) {
 
       if (result.error) {
         if (result.isServerError) {
-          sendJson(response, 500, { error: result.error });
+          sendInternalServerError(response, 'Role assignment failed due to server error');
           return;
         }
         if (result.error === 'User not found') {
-          sendNotFound(response, 'Not Found');
+          sendNotFound(response, 'User not found');
           return;
         }
         sendBadRequest(response, result.error);
@@ -170,18 +401,21 @@ export function createApp(dependencies = {}) {
       }
 
       const formData = await parseFormBody(request);
+
+      if (!formData.role) {
+        sendMissingParameter(response);
+        return;
+      }
+
       const result = userStore.assignRole(formData.userId, formData.role);
 
       if (result.error) {
         if (result.isServerError) {
-          sendJson(response, 500, { error: result.error });
+          sendInternalServerError(response, 'Role assignment failed due to server error');
           return;
         }
-        if (result.error === 'User not found') {
-          sendNotFound(response, 'Not Found');
-          return;
-        }
-        sendBadRequest(response, result.error);
+        const statusCode = result.error === 'User not found' ? 404 : 400;
+        sendJson(response, statusCode, { error: result.error });
         return;
       }
 
@@ -301,6 +535,9 @@ export function createApp(dependencies = {}) {
     }
 
     sendNotFound(response, 'Not Found');
+  } catch (error) {
+    handleUnexpectedError(response, logger, error);
+  }
   }
 
   return createServer(requestListener);

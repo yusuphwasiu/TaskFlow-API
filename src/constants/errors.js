@@ -19,12 +19,28 @@ export const ERROR_CODES = {
     statusCode: 429,
     message: 'Rate limit exceeded',
   },
+  MISSING_PARAMETER: {
+    statusCode: 422,
+    message: 'Missing required parameter',
+  },
   INTERNAL_SERVER_ERROR: {
     statusCode: 500,
-    message: 'Internal Server Error',
+    message: 'Internal server error',
   },
   SERVICE_UNAVAILABLE: {
     statusCode: 503,
-    message: 'Service Unavailable',
+    message: 'Service unavailable',
+  },
+  METHOD_NOT_ALLOWED: {
+    statusCode: 405,
+    message: 'Method Not Allowed',
+  },
+  REQUEST_TIMEOUT: {
+    statusCode: 408,
+    message: 'Request Timeout',
+  },
+  UNSUPPORTED_MEDIA_TYPE: {
+    statusCode: 415,
+    message: 'Unsupported Media Type',
   },
 };
