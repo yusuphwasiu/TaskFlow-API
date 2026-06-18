@@ -270,3 +270,147 @@ test('Audit logs are filtered by date range correctly', async () => {
     await app.close();
   }
 });
+
+test('AC-5: Returns 404 when taskId filter does not match any logs', async () => {
+  const auditStore = createAuditStore();
+  const taskStore = createTaskStore();
+  const app = await startTestServer({ taskStore, auditStore });
+
+  try {
+    // Request audit logs with a non-existent taskId
+    const response = await fetch(`${app.baseUrl}/api/audit/tasks?taskId=non-existent-task`, {
+      headers: { 'x-user-id': 'admin-1' },
+    });
+
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.ok(body.error);
+  } finally {
+    await app.close();
+  }
+});
+
+test('AC-5: Returns 200 when taskId filter matches existing logs', async () => {
+  const auditStore = createAuditStore();
+  const taskStore = createTaskStore();
+  const app = await startTestServer({ taskStore, auditStore });
+
+  try {
+    // Delete a task to create an audit log
+    await fetch(`${app.baseUrl}/api/tasks/task-1`, {
+      method: 'DELETE',
+      headers: { 'x-user-id': 'user-1' },
+    });
+
+    // Request audit logs with the existing taskId
+    const response = await fetch(`${app.baseUrl}/api/audit/tasks?taskId=task-1`, {
+      headers: { 'x-user-id': 'admin-1' },
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.data.length, 1);
+    assert.equal(body.data[0].taskId, 'task-1');
+  } finally {
+    await app.close();
+  }
+});
+
+test('AC-5: Returns 404 when taskId and userId filters both match nothing', async () => {
+  const auditStore = createAuditStore();
+  const taskStore = createTaskStore();
+  const app = await startTestServer({ taskStore, auditStore });
+
+  try {
+    // Request audit logs with both taskId and userId that match nothing
+    const response = await fetch(
+      `${app.baseUrl}/api/audit/tasks?taskId=non-existent-task&userId=non-existent-user`,
+      {
+        headers: { 'x-user-id': 'admin-1' },
+      }
+    );
+
+    assert.equal(response.status, 404);
+  } finally {
+    await app.close();
+  }
+});
+
+test('AC-6: Retention policy purges old logs', async () => {
+  const oldDate = new Date();
+  oldDate.setDate(oldDate.getDate() - 100); // 100 days ago
+
+  const recentDate = new Date();
+  recentDate.setDate(recentDate.getDate() - 10); // 10 days ago
+
+  const testLogs = [
+    {
+      id: 'audit-old',
+      taskId: 'task-old',
+      userId: 'user-1',
+      deletedAt: oldDate.toISOString(),
+    },
+    {
+      id: 'audit-recent',
+      taskId: 'task-recent',
+      userId: 'user-1',
+      deletedAt: recentDate.toISOString(),
+    },
+  ];
+
+  // Create audit store with 90-day retention period
+  const auditStore = createAuditStore(testLogs, { retentionPeriodDays: 90 });
+  const taskStore = createTaskStore();
+  const app = await startTestServer({ taskStore, auditStore });
+
+  try {
+    // Trigger purge
+    const purgeResponse = await fetch(`${app.baseUrl}/api/audit/purge`, {
+      method: 'POST',
+      headers: { 'x-user-id': 'admin-1' },
+    });
+
+    assert.equal(purgeResponse.status, 200);
+    const purgeBody = await purgeResponse.json();
+    assert.equal(purgeBody.data.purgedCount, 1);
+    assert.equal(purgeBody.data.remainingCount, 1);
+    assert.equal(purgeBody.data.retentionPeriodDays, 90);
+
+    // Verify old log was purged and recent log remains
+    const logsResponse = await fetch(`${app.baseUrl}/api/audit/tasks`, {
+      headers: { 'x-user-id': 'admin-1' },
+    });
+
+    const logsBody = await logsResponse.json();
+    assert.equal(logsBody.data.length, 1);
+    assert.equal(logsBody.data[0].taskId, 'task-recent');
+  } finally {
+    await app.close();
+  }
+});
+
+test('AC-6: Retention period is configurable', async () => {
+  const auditStore = createAuditStore([], { retentionPeriodDays: 30 });
+  assert.equal(auditStore.getRetentionPeriod(), 30);
+
+  const auditStoreDefault = createAuditStore([]);
+  assert.equal(auditStoreDefault.getRetentionPeriod(), 90);
+});
+
+test('AC-6: Purge endpoint requires admin permission', async () => {
+  const auditStore = createAuditStore();
+  const taskStore = createTaskStore();
+  const app = await startTestServer({ taskStore, auditStore });
+
+  try {
+    // Try to purge as a non-admin user
+    const response = await fetch(`${app.baseUrl}/api/audit/purge`, {
+      method: 'POST',
+      headers: { 'x-user-id': 'user-1' },
+    });
+
+    assert.equal(response.status, 403);
+  } finally {
+    await app.close();
+  }
+});

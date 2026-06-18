@@ -3,8 +3,9 @@
  * Stores: taskId, userId, timestamp, task title, and associated metadata
  */
 
-export function createAuditStore(initialLogs = []) {
+export function createAuditStore(initialLogs = [], options = {}) {
   const logs = [...initialLogs];
+  const retentionPeriodDays = options.retentionPeriodDays ?? 90;
 
   function logDeletedTask(taskId, userId, taskData = {}) {
     const auditEntry = {
@@ -24,6 +25,11 @@ export function createAuditStore(initialLogs = []) {
 
   function getAuditLogs(filters = {}) {
     let filtered = [...logs];
+
+    // Filter by taskId if provided
+    if (filters.taskId) {
+      filtered = filtered.filter((log) => log.taskId === filters.taskId);
+    }
 
     // Filter by userId if provided
     if (filters.userId) {
@@ -55,10 +61,34 @@ export function createAuditStore(initialLogs = []) {
     logs.length = 0;
   }
 
+  function purgeOldLogs() {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionPeriodDays);
+
+    const beforeCount = logs.length;
+    const cutoffTime = cutoffDate.getTime();
+
+    for (let i = logs.length - 1; i >= 0; i -= 1) {
+      const logTime = new Date(logs[i].deletedAt).getTime();
+      if (logTime < cutoffTime) {
+        logs.splice(i, 1);
+      }
+    }
+
+    const afterCount = logs.length;
+    return { purgedCount: beforeCount - afterCount, remainingCount: afterCount };
+  }
+
+  function getRetentionPeriod() {
+    return retentionPeriodDays;
+  }
+
   return {
     logDeletedTask,
     getAuditLogs,
     getAllLogs,
     clearLogs,
+    purgeOldLogs,
+    getRetentionPeriod,
   };
 }
