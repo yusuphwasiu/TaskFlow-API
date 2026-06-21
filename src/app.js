@@ -34,7 +34,7 @@ export function createApp(dependencies = {}) {
   const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
   const auditRateLimitService =
     dependencies.auditRateLimitService ??
-    createRateLimitService({ limit: 10, windowMs: 60_000 });
+    createRateLimitService({ maxRequestsPerHour: 10, windowMs: 60_000 });
   const taskStore = dependencies.taskStore ?? createTaskStore();
   const auditStore = dependencies.auditStore ?? createAuditStore();
   const alertAdmin = dependencies.alertAdmin ?? (() => {});

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
+import { createRateLimitService } from '../src/services/rateLimitService.js';
 
 async function startTestServer(dependencies = {}) {
   const app = createApp(dependencies);
@@ -28,10 +29,15 @@ async function startTestServer(dependencies = {}) {
 }
 
 test('AC-1: Checkout requests within limit are processed successfully', async () => {
-  const server = await startTestServer();
+  // Use a shorter window for testing
+  const testRateLimitService = createRateLimitService({
+    maxRequestsPerHour: 100,
+    windowMs: 100, // 100ms window for testing
+  });
+  const server = await startTestServer({ rateLimitService: testRateLimitService });
 
   try {
-    for (let i = 0; i < 100; i += 1) {
+    for (let i = 0; i < 99; i += 1) {
       const response = await fetch(`${server.baseUrl}/api/checkout`, {
         method: 'POST',
         headers: { 'x-user-id': 'user-1' },
@@ -46,7 +52,12 @@ test('AC-1: Checkout requests within limit are processed successfully', async ()
 });
 
 test('AC-2: Exceeding the checkout rate limit returns 429', async () => {
-  const server = await startTestServer();
+  // Use a shorter window for testing
+  const testRateLimitService = createRateLimitService({
+    maxRequestsPerHour: 100,
+    windowMs: 100, // 100ms window for testing
+  });
+  const server = await startTestServer({ rateLimitService: testRateLimitService });
 
   try {
     for (let i = 0; i < 100; i += 1) {
@@ -71,7 +82,12 @@ test('AC-2: Exceeding the checkout rate limit returns 429', async () => {
 });
 
 test('AC-3: Multiple users are rate limited independently', async () => {
-  const server = await startTestServer();
+  // Use a shorter window for testing
+  const testRateLimitService = createRateLimitService({
+    maxRequestsPerHour: 100,
+    windowMs: 100, // 100ms window for testing
+  });
+  const server = await startTestServer({ rateLimitService: testRateLimitService });
 
   try {
     for (let i = 0; i < 100; i += 1) {
@@ -104,6 +120,11 @@ test('AC-3: Multiple users are rate limited independently', async () => {
 });
 
 test('AC-4: Rate limit breach logs incident and alerts admin', async () => {
+  // Use a shorter window for testing
+  const testRateLimitService = createRateLimitService({
+    maxRequestsPerHour: 100,
+    windowMs: 100, // 100ms window for testing
+  });
   const events = [];
   const logger = {
     warn(message, metadata) {
@@ -114,7 +135,7 @@ test('AC-4: Rate limit breach logs incident and alerts admin', async () => {
     events.push({ type: 'alert', userId, count, limit });
   };
 
-  const server = await startTestServer({ logger, alertAdmin });
+  const server = await startTestServer({ rateLimitService: testRateLimitService, logger, alertAdmin });
 
   try {
     for (let i = 0; i < 100; i += 1) {

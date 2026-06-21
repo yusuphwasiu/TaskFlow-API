@@ -155,7 +155,7 @@ test('AC-5: Rate limiting is enforced on the audit log retrieval endpoint (10 re
   const taskStore = createTaskStore();
   // Create audit rate limit service with 10 requests per minute
   const auditRateLimitService = createRateLimitService({
-    limit: 10,
+    maxRequestsPerHour: 10,
     windowMs: 60_000,
   });
 

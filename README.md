@@ -135,7 +135,7 @@ GET /api/audit/tasks?startDate=2026-06-17T00:00:00Z&endDate=2026-06-17T23:59:59Z
 - `403 Forbidden` - Insufficient permissions (`admin:manage` required)
 - `429 Too Many Requests` - Rate limit exceeded
 
-**Rate limiting:** 10 requests per minute per user
+**Rate limiting:** 10 requests per minute per user (audit endpoint specific)
 
 **Behavior:**
 - All deleted tasks are automatically logged with timestamp, user ID, task details, and user role
@@ -226,7 +226,7 @@ The checkout endpoint accepts authenticated requests and enforces per-user rate 
 **Headers:**
 - `x-user-id`: authenticated user identifier
 
-**Rate limit:** 100 requests per minute per user
+**Rate limit:** 100 requests per hour per user
 
 **Responses:**
 - `200 OK` - Checkout processed successfully
@@ -257,12 +257,13 @@ Endpoints will include an `error` message and a `standard` field in JSON error r
 
 TaskFlow API enforces per-user rate limiting to prevent abuse:
 
-- `100` requests per `60` seconds per `x-user-id`
+- `100` requests per `hour` per `x-user-id`
 - If a request is over the limit, API returns `429` with:
   - `{ "error": "Rate limit exceeded" }`
 - If rate limiting subsystem is unavailable (e.g., header `x-rate-limit-service-fail`), API returns `503` with:
   - `{ "error": "Service Unavailable" }`
 - Logging on limit violation and service failures is performed via the configured logger
+- **Retry Logic**: On network errors (ECONNRESET, ETIMEDOUT, ENOTFOUND, ECONNREFUSED), the system automatically retries the request up to 3 times with a 100ms delay between attempts
 
 ## Error Handling
 
@@ -275,7 +276,7 @@ TaskFlow API implements standardized HTTP status codes and error messages for co
 | `401` | `Authentication required` | Missing or invalid authentication credentials |
 | `403` | `Forbidden` | User lacks required permissions |
 | `404` | `Not Found` | Requested resource does not exist |
-| `429` | `Rate limit exceeded` | User exceeded rate limit (100 req/min) |
+| `429` | `Rate limit exceeded` | User exceeded rate limit (100 req/hour) |
 | `500` | `Internal Server Error` | Server-side error during request processing |
 | `503` | `Service Unavailable` | Required service (rate limiting, authentication) is unavailable |
 
@@ -294,7 +295,7 @@ All error responses follow this format:
 - **Invalid JSON**: 400 Bad Request (malformed request body)
 - **Unknown Endpoint**: 404 Not Found (path does not match any route)
 - **Unauthorized Action**: 403 Forbidden (user lacks admin:manage permission)
-- **Rate Limit Hit**: 429 Rate limit exceeded (over 100 requests/minute)
+- **Rate Limit Hit**: 429 Rate limit exceeded (over 100 requests/hour)
 
 
 

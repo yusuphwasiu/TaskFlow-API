@@ -1,7 +1,7 @@
 import { RATE_LIMIT } from '../constants/rateLimit.js';
 
 export function createRateLimitService(options = {}) {
-  const maxRequestsPerMinute = options.maxRequestsPerMinute ?? RATE_LIMIT.MAX_REQUESTS_PER_MINUTE;
+  const maxRequestsPerHour = options.maxRequestsPerHour ?? RATE_LIMIT.MAX_REQUESTS_PER_HOUR;
   const windowMs = options.windowMs ?? RATE_LIMIT.WINDOW_MS;
 
   const store = new Map();
@@ -30,13 +30,13 @@ export function createRateLimitService(options = {}) {
     current.count += 1;
     store.set(userId, current);
 
-    const allowed = current.count <= maxRequestsPerMinute;
+    const allowed = current.count <= maxRequestsPerHour;
 
     return {
       userId,
       allowed,
       count: current.count,
-      limit: maxRequestsPerMinute,
+      limit: maxRequestsPerHour,
       windowStart: current.windowStart,
     };
   }
