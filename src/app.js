@@ -34,7 +34,7 @@ export function createApp(dependencies = {}) {
   const rateLimitService = dependencies.rateLimitService ?? createRateLimitService();
   const auditRateLimitService =
     dependencies.auditRateLimitService ??
-    createRateLimitService({ limit: 10, windowMs: 60_000 });
+    createRateLimitService({ maxRequestsPerHour: 10, windowMs: 60_000 });
   const taskStore = dependencies.taskStore ?? createTaskStore();
   const auditStore = dependencies.auditStore ?? createAuditStore();
   const alertAdmin = dependencies.alertAdmin ?? (() => {});
@@ -250,11 +250,15 @@ export function createApp(dependencies = {}) {
       // Parse query filters
       const filters = {};
       const queryUserId = url.searchParams.get('userId');
+      const queryTaskId = url.searchParams.get('taskId');
       const queryStartDate = url.searchParams.get('startDate');
       const queryEndDate = url.searchParams.get('endDate');
 
       if (queryUserId) {
         filters.userId = queryUserId;
+      }
+      if (queryTaskId) {
+        filters.taskId = queryTaskId;
       }
       if (queryStartDate) {
         filters.startDate = queryStartDate;
@@ -266,8 +270,39 @@ export function createApp(dependencies = {}) {
       // Retrieve filtered audit logs
       const logs = auditStore.getAuditLogs(filters);
 
+      // AC-5: If taskId is provided and no logs match, return 404
+      if (queryTaskId && logs.length === 0) {
+        sendNotFound(response, 'Not Found');
+        return;
+      }
+
       sendJson(response, 200, {
         data: logs,
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/audit/purge') {
+      // Require admin:manage permission to purge old logs
+      const user = await authorizeRequest(request, response, {
+        permission: 'admin:manage',
+        roleService,
+        logger,
+      });
+
+      if (!user) {
+        return;
+      }
+
+      // Purge old logs based on retention policy
+      const result = auditStore.purgeOldLogs();
+
+      sendJson(response, 200, {
+        data: {
+          purgedCount: result.purgedCount,
+          remainingCount: result.remainingCount,
+          retentionPeriodDays: auditStore.getRetentionPeriod(),
+        },
       });
       return;
     }

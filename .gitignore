@@ -140,3 +140,6 @@ vite.config.ts.timestamp-*
 
 
 .spectrace/*
+
+# Spectrace AI context (local only)
+.spectrace/
